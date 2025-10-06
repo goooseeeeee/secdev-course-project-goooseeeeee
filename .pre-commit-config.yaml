@@ -21,3 +21,10 @@ repos:
     hooks:
       - id: ruff
         args: ["--fix"]
+  - repo: local
+    hooks:
+      - id: no-push-to-main
+        name: "Block push to main branch"
+        entry: bash -c 'branch="$(git rev-parse --abbrev-ref HEAD)"; if [ "$branch" = "main" ]; then echo "❌ Push to main is not allowed. Use PR instead."; exit 1; fi'
+        language: system
+        stages: [push]
