@@ -13,7 +13,7 @@ uvicorn app.main:app --reload
 
 ## Ритуал перед PR
 ```bash
-ruff --fix .
+ruff check --fix .
 black .
 isort .
 pytest -q
@@ -38,9 +38,11 @@ docker compose up --build
 ```
 
 ## Эндпойнты
-- `GET /health` → `{"status": "ok"}`
-- `POST /items?name=...` — демо-сущность
-- `GET /items/{id}`
+- `POST /wishes/` - Создаёт новое желание и возвращает его с присвоенным ID.
+- `GET /wishes/` - Возвращает список всех желаний. Поддерживает фильтрацию и сортировку.
+- `GET /wishes/{wish_id}` - Возвращает информацию о конкретном желании по его ID.
+- `PUT /wishes/{wish_id}` - Обновляет данные существующего желания.
+- `DELETE /wishes/{wish_id}` - Удаляет желание по ID.
 
 ## Формат ошибок
 Все ошибки — JSON-обёртка:
