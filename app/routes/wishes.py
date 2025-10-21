@@ -1,7 +1,12 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field, HttpUrl
+from starlette.responses import JSONResponse
+
+MAX_FILE_SIZE = 5 * 1024 * 1024
+ALLOWED_TYPES = {"image/png", "application/pdf"}
+
 
 router = APIRouter(prefix="/wishes", tags=["wishes"])
 
@@ -47,7 +52,7 @@ def list_wishes(
     max_price: Optional[float] = Query(None, gt=0, description="Максимальная цена"),
     category: Optional[str] = Query(None, description="Фильтр по категории"),
     sort_by: Optional[str] = Query(
-        None, regex="^(price_estimate|title)$", description="Сортировка по полю"
+        None, pattern="^(price_estimate|title)$", description="Сортировка по полю"
     ),
 ):
     """
@@ -104,3 +109,33 @@ def delete_wish(wish_id: int):
             _DB_WISHES.pop(i)
             return {"message": "Wish deleted"}
     raise HTTPException(status_code=404, detail="Wish not found")
+
+
+@router.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    if ".." in file.filename or "/" in file.filename or "\\" in file.filename:
+        return JSONResponse(
+            status_code=400,
+            content={"title": "Invalid file path", "correlation_id": "xxx"},
+        )
+
+    if file.content_type not in ALLOWED_TYPES:
+        return JSONResponse(
+            status_code=400,
+            content={"title": "Invalid file type", "correlation_id": "xxx"},
+        )
+
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        return JSONResponse(
+            status_code=413,
+            content={
+                "type": "https://example.com/probs/file-too-large",
+                "title": "File too large",
+                "status": 413,
+                "detail": "The uploaded file exceeds the allowed size",
+                "correlation_id": "xxx",
+            },
+        )
+
+    return {"filename": file.filename, "size": len(content)}

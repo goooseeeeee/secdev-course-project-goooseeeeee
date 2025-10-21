@@ -1,7 +1,11 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from app.routes import wishes
+
 app = FastAPI(title="SecDev Course App", version="0.1.0")
+
+app.include_router(wishes.router)
 
 
 class ApiError(Exception):
