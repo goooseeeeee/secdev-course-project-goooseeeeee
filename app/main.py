@@ -5,6 +5,10 @@ from fastapi.responses import JSONResponse
 
 from app.routes import wishes
 
+TEST_MODE = bool(os.environ.get("PYTEST_RUNNING"))
+if TEST_MODE:
+    os.environ.setdefault("JWT_SECRET", "testsecret123456")
+
 JWT_SECRET = os.environ.get("JWT_SECRET")
 if not JWT_SECRET or len(JWT_SECRET) < 16:
     raise RuntimeError("JWT_SECRET missing or too short!")
