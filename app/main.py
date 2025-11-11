@@ -5,7 +5,9 @@ from fastapi.responses import JSONResponse
 
 from app.routes import wishes
 
-if os.environ.get("PYTEST_RUNNING") or os.environ.get("CI"):
+TEST_MODE = bool(os.environ.get("PYTEST_RUNNING"))
+
+if TEST_MODE:
     os.environ.setdefault("JWT_SECRET", "testsecret123456")
 
 JWT_SECRET = os.environ.get("JWT_SECRET")
