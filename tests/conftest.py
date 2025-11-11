@@ -1,3 +1,7 @@
+import os
+
+os.environ.setdefault("JWT_SECRET", "testsecret123")
+
 import sys
 from pathlib import Path
 

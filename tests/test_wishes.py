@@ -2,7 +2,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.routes.wishes import _DB_WISHES, router
+from app.routes.wishes import _DB_WISHES, MAX_FILE_SIZE, router
 
 
 @pytest.fixture(autouse=True)
@@ -120,3 +120,55 @@ def test_delete_wish(client):
     response = client.delete(f"/wishes/{created['id']}")
     assert response.status_code == 404
     assert response.json()["detail"] == "Wish not found"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"title": ""},  # пустой title
+        {"title": "x" * 101},  # слишком длинный title
+        {"title": "Wish", "price_estimate": -10},  # отрицательная цена
+        {"title": "Wish", "link": "not_a_url"},  # некорректный URL
+    ],
+)
+def test_create_wish_invalid(client, payload):
+    response = client.post("/wishes/", json=payload)
+    assert response.status_code == 422
+
+
+def test_upload_file_valid(client, tmp_path):
+    file_path = tmp_path / "test.png"
+    file_path.write_bytes(b"\x89PNG\r\n\x1a\nfakecontent")
+    with open(file_path, "rb") as f:
+        response = client.post(
+            "/wishes/upload", files={"file": ("test.png", f, "image/png")}
+        )
+    assert response.status_code == 200
+    data = response.json()
+    assert "filename" in data
+    assert data["size"] == len(b"\x89PNG\r\n\x1a\nfakecontent")
+
+
+@pytest.mark.parametrize(
+    "file_data,content_type",
+    [
+        (b"wrongcontent", "image/png"),  # неверный magic bytes
+        (b"%PDF- content", "image/png"),  # тип не совпадает с magic bytes
+    ],
+)
+def test_upload_file_invalid_magic(client, file_data, content_type):
+    response = client.post(
+        "/wishes/upload", files={"file": ("file.dat", file_data, content_type)}
+    )
+    assert response.status_code == 400
+
+
+def test_upload_file_too_large(client, tmp_path):
+    big_content = b"a" * (MAX_FILE_SIZE + 1)
+    file_path = tmp_path / "big.pdf"
+    file_path.write_bytes(big_content)
+    with open(file_path, "rb") as f:
+        response = client.post(
+            "/wishes/upload", files={"file": ("big.pdf", f, "application/pdf")}
+        )
+    assert response.status_code == 413

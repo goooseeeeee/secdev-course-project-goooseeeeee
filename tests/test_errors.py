@@ -21,15 +21,6 @@ def test_validation_error():
     assert body["error"]["code"] == "validation_error"
 
 
-def test_valid_file_upload():
-    file_content = b"PNG" + b"\x00" * 1000
-    response = client.post(
-        "/wishes/upload",
-        files={"file": ("test.png", io.BytesIO(file_content), "image/png")},
-    )
-    assert response.status_code == 200
-
-
 def test_large_file_rejected():
     file_content = b"X" * (6 * 1024 * 1024)
     response = client.post(
