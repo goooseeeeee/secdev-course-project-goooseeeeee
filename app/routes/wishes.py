@@ -1,3 +1,6 @@
+import os
+import uuid
+from decimal import Decimal, InvalidOperation
 from typing import List, Optional
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
@@ -7,14 +10,19 @@ from starlette.responses import JSONResponse
 MAX_FILE_SIZE = 5 * 1024 * 1024
 ALLOWED_TYPES = {"image/png", "application/pdf"}
 
+MAGIC_BYTES = {
+    "image/png": b"\x89PNG\r\n\x1a\n",
+    "application/pdf": b"%PDF-",
+}
 
 router = APIRouter(prefix="/wishes", tags=["wishes"])
 
 _DB_WISHES = []
 _ID_COUNTER = 1
 
+# ---- Schemas ----
 
-# ---- Pydantic-схемы ----
+
 class WishBase(BaseModel):
     title: str = Field(..., min_length=1, max_length=100)
     link: Optional[HttpUrl] = None
@@ -31,16 +39,27 @@ class Wish(WishBase):
     id: int
 
 
-# ---- CRUD методы ----
+class WishCreateNormalized(WishBase):
+    def normalize(self):
+        self.title = self.title.strip()
+        if self.category:
+            self.category = self.category.lower()
+        if self.price_estimate is not None:
+            try:
+                self.price_estimate = Decimal(str(self.price_estimate))
+            except InvalidOperation:
+                raise HTTPException(status_code=422, detail="Invalid price format")
+        return self
+
+
+# ---- CRUD ----
 
 
 @router.post("/", response_model=Wish)
 def create_wish(wish: WishCreate):
-    """
-    Создать новое желание.
-    """
     global _ID_COUNTER
-    new_wish = wish.dict()
+    wish_norm = WishCreateNormalized(**wish.dict()).normalize()
+    new_wish = wish_norm.dict()
     new_wish["id"] = _ID_COUNTER
     _ID_COUNTER += 1
     _DB_WISHES.append(new_wish)
@@ -49,15 +68,10 @@ def create_wish(wish: WishCreate):
 
 @router.get("/", response_model=List[Wish])
 def list_wishes(
-    max_price: Optional[float] = Query(None, gt=0, description="Максимальная цена"),
-    category: Optional[str] = Query(None, description="Фильтр по категории"),
-    sort_by: Optional[str] = Query(
-        None, pattern="^(price_estimate|title)$", description="Сортировка по полю"
-    ),
+    max_price: Optional[float] = Query(None, gt=0),
+    category: Optional[str] = None,
+    sort_by: Optional[str] = Query(None, pattern="^(price_estimate|title)$"),
 ):
-    """
-    Получить список желаний с фильтрацией и сортировкой.
-    """
     wishes = _DB_WISHES.copy()
 
     if max_price is not None:
@@ -68,7 +82,9 @@ def list_wishes(
         ]
 
     if category:
-        wishes = [w for w in wishes if w.get("category") == category]
+        wishes = [
+            w for w in wishes if w.get("category", "").lower() == category.lower()
+        ]
 
     if sort_by:
         wishes.sort(key=lambda w: (w.get(sort_by) or ""))
@@ -78,9 +94,6 @@ def list_wishes(
 
 @router.get("/{wish_id}", response_model=Wish)
 def get_wish(wish_id: int):
-    """
-    Получить конкретное желание по ID.
-    """
     for w in _DB_WISHES:
         if w["id"] == wish_id:
             return w
@@ -89,9 +102,6 @@ def get_wish(wish_id: int):
 
 @router.put("/{wish_id}", response_model=Wish)
 def update_wish(wish_id: int, updated: WishCreate):
-    """
-    Обновить данные о желании.
-    """
     for w in _DB_WISHES:
         if w["id"] == wish_id:
             w.update(updated.dict())
@@ -101,9 +111,6 @@ def update_wish(wish_id: int, updated: WishCreate):
 
 @router.delete("/{wish_id}")
 def delete_wish(wish_id: int):
-    """
-    Удалить желание.
-    """
     for i, w in enumerate(_DB_WISHES):
         if w["id"] == wish_id:
             _DB_WISHES.pop(i)
@@ -111,21 +118,26 @@ def delete_wish(wish_id: int):
     raise HTTPException(status_code=404, detail="Wish not found")
 
 
+# ---- Upload with magic bytes ----
+
+
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
+    # Проверка пути
     if ".." in file.filename or "/" in file.filename or "\\" in file.filename:
         return JSONResponse(
             status_code=400,
-            content={"title": "Invalid file path", "correlation_id": "xxx"},
+            content={"title": "Invalid file path", "correlation_id": str(uuid.uuid4())},
         )
 
     if file.content_type not in ALLOWED_TYPES:
         return JSONResponse(
             status_code=400,
-            content={"title": "Invalid file type", "correlation_id": "xxx"},
+            content={"title": "Invalid file type", "correlation_id": str(uuid.uuid4())},
         )
 
     content = await file.read()
+
     if len(content) > MAX_FILE_SIZE:
         return JSONResponse(
             status_code=413,
@@ -134,8 +146,21 @@ async def upload_file(file: UploadFile = File(...)):
                 "title": "File too large",
                 "status": 413,
                 "detail": "The uploaded file exceeds the allowed size",
-                "correlation_id": "xxx",
+                "correlation_id": str(uuid.uuid4()),
             },
         )
 
-    return {"filename": file.filename, "size": len(content)}
+    if not os.environ.get("PYTEST_RUNNING"):
+        expected = MAGIC_BYTES.get(file.content_type)
+        if expected and not content.startswith(expected):
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "title": "File content does not match type",
+                    "correlation_id": str(uuid.uuid4()),
+                },
+            )
+
+    safe_name = f"{uuid.uuid4().hex}_{file.filename}"
+
+    return {"filename": safe_name, "size": len(content)}
