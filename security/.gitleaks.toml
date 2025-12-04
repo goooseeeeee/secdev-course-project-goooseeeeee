@@ -1,0 +1,8 @@
+title = "Baseline gitleaks config"
+
+[allowlist]
+description = "Allow common test patterns"
+regexes = [
+  '''(?i)test''',
+  '''(?i)example'''
+]
