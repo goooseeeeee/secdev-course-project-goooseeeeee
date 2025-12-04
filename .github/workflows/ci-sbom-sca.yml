@@ -1,0 +1,83 @@
+name: Security - SBOM & SCA
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'requirements*.txt'
+      - '**/*.py'
+      - '.github/workflows/ci-sbom-sca.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sbom-sca-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sbom-sca:
+    name: SBOM & SCA
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure EVIDENCE dir exists
+        run: |
+          mkdir -p EVIDENCE/P09
+
+      - name: Generate SBOM (Syft -> CycloneDX JSON)
+        run: |
+          # запускаем Syft в контейнере, результат перенаправляем в файл в рабочем каталоге
+          docker run --rm -v "${{ github.workspace }}":/work -w /work anchore/syft:latest \
+            packages dir:. -o cyclonedx-json > EVIDENCE/P09/sbom.json
+        env:
+          DOCKER_BUILDKIT: 1
+
+      - name: Show SBOM summary (first lines)
+        run: |
+          echo "SBOM file size and head:"
+          ls -lh EVIDENCE/P09/sbom.json || true
+          head -n 40 EVIDENCE/P09/sbom.json || true
+
+      - name: Install jq (for summary)
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Run SCA (Grype) using SBOM -> JSON report
+        run: |
+          # Grype reads sbom via sbom:/work/EVIDENCE/P09/sbom.json
+          docker run --rm -v "${{ github.workspace }}":/work -w /work anchore/grype:latest \
+            sbom:/work/EVIDENCE/P09/sbom.json -o json > EVIDENCE/P09/sca_report.json || true
+
+      - name: Produce SCA summary (counts by severity)
+        run: |
+          echo "# SCA summary" > EVIDENCE/P09/sca_summary.md
+          echo "" >> EVIDENCE/P09/sca_summary.md
+          if [ -s EVIDENCE/P09/sca_report.json ]; then
+            echo "## Counts by severity" >> EVIDENCE/P09/sca_summary.md
+            jq -r '
+              [.matches[].vulnerability.severity]
+              | group_by(.)
+              | map({(.[0]): length})
+              | add
+              ' EVIDENCE/P09/sca_report.json  >> EVIDENCE/P09/sca_summary.md || echo "no vulnerabilities or parse error" >> EVIDENCE/P09/sca_summary.md
+
+            echo "" >> EVIDENCE/P09/sca_summary.md
+            echo "## Short comments" >> EVIDENCE/P09/sca_summary.md
+            # example: show top 5 matches
+            jq -r '.matches[] | {vulnerability: .vulnerability.id, severity: .vulnerability.severity, package: .artifact.name, version: .artifact.version} | @json' EVIDENCE/P09/sca_report.json | head -n 5 >> EVIDENCE/P09/sca_summary.md || true
+          else
+            echo "No sca_report.json generated." >> EVIDENCE/P09/sca_summary.md
+          fi
+
+      - name: List evidence files
+        run: ls -l EVIDENCE/P09 || true
+
+      - name: Upload evidence artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: p09-evidence
+          path: EVIDENCE/P09/*
