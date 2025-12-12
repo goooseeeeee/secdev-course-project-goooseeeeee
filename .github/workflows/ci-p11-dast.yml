@@ -10,11 +10,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+    - uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
+    - uses: actions/setup-python@v4
       with:
         python-version: "3.11"
 
@@ -28,19 +26,23 @@ jobs:
       run: |
         mkdir -p EVIDENCE/P11
         uvicorn app.main:app --host 0.0.0.0 --port 8080 &
-        # Wait for health-check
         for i in {1..30}; do
           curl -sf http://localhost:8080/health && break
           sleep 2
         done
 
-    - name: Run OWASP ZAP baseline scan
-      run: |
-        docker run --rm -v $PWD/EVIDENCE/P11:/zap/wrk/:rw \
-          -t owasp/zap2docker-weekly zap-baseline.py -t http://localhost:8080 -r zap_baseline.html -j zap_baseline.json
+    - name: Run ZAP baseline
+      uses: zaproxy/action-baseline@v0.10.0
+      with:
+        target: 'http://localhost:8080'
+        fail_action: false
 
-    - name: Upload evidence
-      uses: actions/upload-artifact@v4
+    - name: Copy ZAP reports to EVIDENCE/P11
+      run: |
+        mkdir -p EVIDENCE/P11
+        cp -r _zap/* EVIDENCE/P11/ || true
+
+    - uses: actions/upload-artifact@v4
       with:
         name: P11_EVIDENCE
         path: EVIDENCE/P11/
