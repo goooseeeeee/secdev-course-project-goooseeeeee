@@ -1,0 +1,55 @@
+name: P11 DAST (OWASP ZAP baseline)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [p11-dast-zap]
+
+jobs:
+  dast:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install "uvicorn[standard]"
+
+    - name: Start FastAPI service
+      run: |
+        mkdir -p EVIDENCE/P11
+        uvicorn app.main:app --host 0.0.0.0 --port 8080 &
+        # Wait for health-check
+        for i in {1..30}; do
+          curl -sf http://localhost:8080/health && break
+          sleep 2
+        done
+
+    - name: Run OWASP ZAP baseline (JSON)
+      uses: zaproxy/action-baseline@v0.7.0
+      with:
+        target: 'http://localhost:8080'
+        format: 'json'
+        output: 'EVIDENCE/P11/zap_baseline.json'
+
+    - name: Run OWASP ZAP baseline (HTML)
+      uses: zaproxy/action-baseline@v0.7.0
+      with:
+        target: 'http://localhost:8080'
+        format: 'html'
+        output: 'EVIDENCE/P11/zap_baseline.html'
+
+    - name: Upload evidence
+      uses: actions/upload-artifact@v3
+      with:
+        name: P11_EVIDENCE
+        path: EVIDENCE/P11/
