@@ -1,0 +1,45 @@
+name: Security - IaC & Container (P12)
+
+on:
+  push:
+    paths:
+      - 'Dockerfile'
+      - 'iac/**'
+      - 'security/**'
+  workflow_dispatch:
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v2
+
+      # Build image
+      - name: Build Docker image
+        run: |
+          docker build -t app:local .
+
+      # Hadolint
+      - name: Run Hadolint
+        run: |
+          docker run --rm -i hadolint/hadolint < Dockerfile -f json > EVIDENCE/P12/hadolint_report.json
+
+      # Checkov
+      - name: Run Checkov
+        run: |
+          checkov -d iac -o json > EVIDENCE/P12/checkov_report.json
+
+      # Trivy
+      - name: Run Trivy
+        run: |
+          trivy image -f json -o EVIDENCE/P12/trivy_report.json app:local
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: P12_EVIDENCE
+          path: EVIDENCE/P12/

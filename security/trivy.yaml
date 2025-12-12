@@ -1,0 +1,5 @@
+severities:
+  - CRITICAL
+  - HIGH
+format: json
+output: EVIDENCE/P12/trivy_report.json
